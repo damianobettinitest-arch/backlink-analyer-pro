@@ -17,6 +17,24 @@
     /* Piccole ottimizzazioni UI */
     .tooltip-trigger:hover .tooltip-content { display: block; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    
+    /* Stili per le colonne ridimensionabili */
+    .resizer {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 5px;
+      cursor: col-resize;
+      z-index: 10;
+      transition: background-color 0.2s;
+    }
+    .resizer:hover, .resizer.is-resizing {
+      background-color: #3b82f6; /* Tailwind blue-500 */
+    }
+    th {
+      position: relative;
+    }
   </style>
 </head>
 <body class="bg-gray-50 text-gray-800">
@@ -25,7 +43,7 @@
 
   <!-- Il codice dell'applicazione React -->
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     // --- COMPONENTI ICONE ---
     const Icon = ({ path, size = 24, className = "" }) => (
@@ -44,10 +62,29 @@
       spreadsheet: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M8 13h2"></path><path d="M8 17h2"></path><path d="M14 13h2"></path><path d="M14 17h2"></path>'
     };
 
+    // --- LINGUA E RILEVAMENTO ---
+    const italianStopWords = [' il ', ' lo ', ' la ', ' i ', ' gli ', ' le ', ' un ', ' uno ', ' una ', ' di ', ' a ', ' da ', ' in ', ' con ', ' su ', ' per ', ' tra ', ' fra ', ' e ', ' ed ', ' o ', ' ma ', ' che ', ' non ', ' si ', ' è ', ' come ', ' più ', ' al ', ' allo ', ' alla ', ' ai ', ' agli ', ' alle ', ' del ', ' dello ', ' della ', ' dei ', ' degli ', ' delle ', ' nel ', ' nello ', ' nella ', ' nei ', ' negli ', ' nelle '];
+    
+    // Funzione euristica per rilevare se un titolo "sembra" italiano
+    const isItalianTitle = (title) => {
+      // Normalizza il testo inserendo spazi extra per agevolare il matching esatto delle singole parole
+      const lowerTitle = ` ${title.toLowerCase().replace(/[^\w\sàèéìòù]/g, ' ')} `;
+      let matchCount = 0;
+      for (const word of italianStopWords) {
+        if (lowerTitle.includes(word)) {
+          matchCount++;
+          // Se trova almeno 2 occorrenze di stop-words italiane, lo consideriamo "italiano"
+          if (matchCount >= 2) return true;
+        }
+      }
+      return false;
+    };
+
     // --- LOGICA DI CATEGORIZZAZIONE ---
     const SPAM_TLDS = ['.xyz', '.top', '.click', '.monster', '.space', '.pw', '.cc', '.ru', '.tokyo', '.icu', '.club', '.online', '.site'];
     const SPAM_KEYWORDS = ['telegram', 'seo', 'traffic', 'backlink', 'index', 'black hat', 'pbn', 'anomaly', 'boost', 'viagra', 'cialis', 'porn', 'escort'];
-    const AFFILIATE_KEYWORDS = ['quote', 'pronostic', 'bonus', 'scommess', 'match', 'bookmaker', 'comparazion', 'migliori', 'schedin', 'betting', 'casino', 'slot', 'poker', 'odds', 'freebet'];
+    // Aggiunte le keyword relative alle sponsorizzazioni e advertorial
+    const AFFILIATE_KEYWORDS = ['quote', 'pronostic', 'bonus', 'scommess', 'match', 'bookmaker', 'comparazion', 'migliori', 'schedin', 'betting', 'casino', 'slot', 'poker', 'odds', 'freebet', 'sponsored', 'sponsorizzato', 'advertorial'];
 
     const categorizeRow = (rowObj, titleCounts = {}) => {
       const url = (rowObj['Source url'] || '').toLowerCase().trim();
@@ -63,7 +100,6 @@
 
       // Analisi Dominio / Sottodominio
       const domainParts = hostname.replace(/^www\./, '').split('.');
-      // Consideriamo sottodominio se ci sono più di 2 parti (es. blog.dominio.it) ignorando casi come .co.uk (anche se rari per mercato IT)
       const isSubdomain = domainParts.length > 2 && !hostname.endsWith('.co.uk') && !hostname.endsWith('.gov.it');
 
       // 1. SPAM
@@ -71,10 +107,10 @@
       if (SPAM_TLDS.some(tld => hostname.endsWith(tld))) isSpam = true;
       if (SPAM_KEYWORDS.some(kw => combinedText.includes(kw))) isSpam = true;
       if (title && titleCounts[title] > 4) isSpam = true; 
-      if (isSubdomain) isSpam = true; // Sottodomini classificati come probabile spam
+      if (isSubdomain) isSpam = true;
       if (isSpam) return 'Spam';
 
-      // 2. AFFILIAZIONE
+      // 2. AFFILIAZIONE / SPONSORED
       let isAffiliate = false;
       if (AFFILIATE_KEYWORDS.some(kw => combinedText.includes(kw))) isAffiliate = true;
       const isAnchorUrl = anchor.includes('www.') || anchor.startsWith('http') || (anchor.includes('.it') && !anchor.includes(' ')) || (anchor.includes('.com') && !anchor.includes(' '));
@@ -82,24 +118,25 @@
       const hasMoneyOrPromo = /\d+\s*(€|euro|\$|£|%)/i.test(anchor) || /[€$£]\s*\d+/.test(anchor);
       const isStrictNumber = /^\d+([.,]\d+)?$/.test(anchor);
       if (hasMoneyOrPromo || isStrictNumber) isAffiliate = true;
-      if (isAffiliate) return 'Affiliazione';
+      
+      // Ritorniamo il nuovo nome della categoria
+      if (isAffiliate) return 'Affiliazione / Sponsored';
 
       // 3. ARTICLE MARKETING
       let isArticle = false;
       const validTlds = ['.it', '.com', '.net', '.org', '.eu', '.info', '.blog'];
       const hasValidTld = validTlds.some(tld => hostname.endsWith(tld));
       
-      // Deve essere un dominio principale (non sottodominio) con TLD valido
       if (hasValidTld && !isSubdomain) {
         const domainName = domainParts[0];
         
-        // Anchor naturale discorsivo
+        // L'anchor deve essere discorsivo
         const isNaturalAnchor = anchor.includes(' ') && anchor.length > 5 && !isAnchorUrl;
         
-        // Titolo naturale discorsivo
-        const isNaturalTitle = title.includes(' ') && title.length > 10;
+        // Il titolo deve essere discorsivo E in italiano (escludiamo titoli in inglese anche su .it)
+        const isNaturalTitle = title.includes(' ') && title.length > 10 && isItalianTitle(title);
         
-        // Struttura URL tipica da articolo: contiene data (es. /2026/02/) o permalink con almeno 3 trattini
+        // Struttura URL tipica da articolo
         const hasArticleStructure = /\/\d{4}\/\d{2}/.test(url) || ((url.match(/-/g) || []).length >= 3);
 
         if (domainName.length < 25 && !combinedText.includes('forum') && !combinedText.includes('directory') && isNaturalAnchor && isNaturalTitle && hasArticleStructure) {
@@ -160,6 +197,17 @@
       return [header, ...rows].join('\n');
     };
 
+    // --- LARGHEZZE COLONNE DI DEFAULT ---
+    const DEFAULT_WIDTHS = {
+      'First seen': 120,
+      'Categoria': 200,
+      'Source title': 350,
+      'Source url': 350,
+      'Anchor': 250,
+      'Target url': 300,
+      'Page ascore': 120
+    };
+
     // --- COMPONENTI UI ---
     const EditableCell = ({ value, isUrl, onSave }) => {
       const [isEditing, setIsEditing] = useState(false);
@@ -186,11 +234,11 @@
       const displayVal = value || '-';
 
       return (
-        <div className="group flex items-center gap-2 max-w-xs sm:max-w-sm md:max-w-md lg:max-w-lg">
-          <div className="truncate flex-1" title={value}>
+        <div className="group flex items-center gap-2">
+          <div className="truncate flex-1 min-w-0" title={value}>
             {isUrl && value ? (
               <a href={value.startsWith('http') ? value : `https://${value}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                {displayVal} <Icon path={icons.external} size={12} className="inline opacity-50" />
+                {displayVal} <Icon path={icons.external} size={12} className="inline opacity-50 flex-shrink-0" />
               </a>
             ) : ( <span className="text-gray-700">{displayVal}</span> )}
           </div>
@@ -206,6 +254,8 @@
       const [data, setData] = useState([]);
       const [headers, setHeaders] = useState([]);
       const [visibleColumns, setVisibleColumns] = useState([]);
+      const [colWidths, setColWidths] = useState({});
+      
       const [activeTab, setActiveTab] = useState('Tutti');
       const [isInfoOpen, setIsInfoOpen] = useState(false);
       const [isColumnsMenuOpen, setIsColumnsMenuOpen] = useState(false);
@@ -243,16 +293,15 @@
             return rowObj;
           });
 
-          // ORDINAMENTO CRONOLOGICO DECRESCENTE (Basato su First seen se presente)
+          // ORDINAMENTO CRONOLOGICO DECRESCENTE
           parsedData.sort((a, b) => (b['First seen'] || '').localeCompare(a['First seen'] || ''));
 
-          // PREPARAZIONE INTESTAZIONI: FORZA "First seen" IN CIMA
+          // PREPARAZIONE INTESTAZIONI
           const displayHeaders = [...fileHeaders];
           const fsIndex = displayHeaders.indexOf('First seen');
           if (fsIndex !== -1) displayHeaders.splice(fsIndex, 1);
           
           const headersWithCat = ['First seen', 'Categoria', ...displayHeaders];
-          
           const defaultVisible = ['First seen', 'Categoria', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
           const initialVisible = headersWithCat.filter(h => defaultVisible.includes(h));
           
@@ -278,8 +327,36 @@
       };
 
       const toggleColumn = (col) => {
-        if (col === 'First seen') return; // Impedisce di nascondere First seen
+        if (col === 'First seen') return;
         setVisibleColumns(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
+      };
+
+      // --- LOGICA DI RIDIMENSIONAMENTO COLONNE (DRAG) ---
+      const handleResizeStart = (e, col) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const startX = e.clientX;
+        const th = e.target.closest('th');
+        const startWidth = th.offsetWidth;
+        
+        const onMouseMove = (moveEvent) => {
+          // Utilizziamo un minWidth di 60px
+          const newWidth = Math.max(60, startWidth + (moveEvent.clientX - startX));
+          // Aggiorniamo il DOM live (più fluido di setState)
+          th.style.width = `${newWidth}px`;
+        };
+
+        const onMouseUp = (upEvent) => {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+          
+          const finalWidth = Math.max(60, startWidth + (upEvent.clientX - startX));
+          setColWidths(prev => ({ ...prev, [col]: finalWidth }));
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
       };
 
       const downloadFile = (content, filename) => {
@@ -298,7 +375,6 @@
         return data.filter(d => d.Categoria === activeTab);
       }, [data, activeTab]);
 
-      // Gestione paginazione calcolata in base alla config (Numero o 'All')
       const pageSize = pageSizeConfig === 'All' ? Math.max(1, filteredData.length) : pageSizeConfig;
       const totalPages = Math.ceil(filteredData.length / pageSize);
       
@@ -309,7 +385,7 @@
 
       useEffect(() => { setCurrentPage(1); }, [activeTab, pageSizeConfig]);
 
-      const TABS = ['Tutti', 'Spam', 'Article Marketing', 'Affiliazione', 'Non Categorizzato', 'Domini .it'];
+      const TABS = ['Tutti', 'Spam', 'Article Marketing', 'Affiliazione / Sponsored', 'Non Categorizzato', 'Domini .it'];
 
       return (
         <div className="min-h-screen">
@@ -354,7 +430,7 @@
                 {activeTab === 'Domini .it' && (
                   <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-xl text-sm flex items-start gap-3 shadow-sm">
                     <Icon path={icons.info} size={20} className="mt-0.5 flex-shrink-0 text-blue-600" />
-                    <p><strong>Nota:</strong> Questa scheda filtra ed espone <em>tutti</em> i link provenienti da domini <strong>.it</strong>, senza distinzione di categoria (Spam, Affiliazione, Article, ecc.). Come richiesto, l'ordinamento rimane cronologico decrescente.</p>
+                    <p><strong>Nota:</strong> Questa scheda filtra ed espone <em>tutti</em> i link provenienti da domini <strong>.it</strong>, senza distinzione di categoria. L'ordinamento rimane cronologico decrescente.</p>
                   </div>
                 )}
 
@@ -390,8 +466,8 @@
                         </div>
                       )}
                     </div>
-                    <button onClick={() => downloadFile(convertToCSV(filteredData, headers), `Semrush_${activeTab}.csv`)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
-                      <Icon path={icons.download} size={16} /> <span>Scarica {activeTab}</span>
+                    <button onClick={() => downloadFile(convertToCSV(filteredData, headers), `Semrush_${activeTab.replace(/\//g,'_')}.csv`)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
+                      <Icon path={icons.download} size={16} /> <span>Scarica Vista</span>
                     </button>
                     <button onClick={() => downloadFile(convertToCSV(data, headers), `Semrush_Completo.csv`)} className="bg-blue-600 text-white py-1.5 px-3 rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-medium">
                       <Icon path={icons.download} size={16} /> <span>Scarica Tutto</span>
@@ -399,13 +475,25 @@
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col">
+                  {/* Wrapper per garantire scroll ed evitare compattamenti: table-fixed e larghezza basata sul contenuto o 100% */}
                   <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
+                    <table className="divide-y divide-gray-200 table-fixed" style={{ minWidth: '100%', width: 'max-content' }}>
                       <thead className="bg-gray-50">
                         <tr>
                           {headers.filter(h => visibleColumns.includes(h)).map(col => (
-                            <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">{col}</th>
+                            <th 
+                              key={col} 
+                              className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 last:border-r-0 group select-none"
+                              style={{ width: colWidths[col] || DEFAULT_WIDTHS[col] || 150 }}
+                            >
+                              <div className="truncate">{col}</div>
+                              <div 
+                                onMouseDown={(e) => handleResizeStart(e, col)} 
+                                className="resizer opacity-0 group-hover:opacity-100"
+                                title="Trascina per ridimensionare"
+                              ></div>
+                            </th>
                           ))}
                         </tr>
                       </thead>
@@ -414,9 +502,15 @@
                           paginatedData.map((row) => (
                             <tr key={row._id} className="hover:bg-gray-50/50 transition-colors group">
                               {headers.filter(h => visibleColumns.includes(h)).map(col => (
-                                <td key={col} className="px-4 py-2 text-sm">
+                                <td key={col} className="px-4 py-2 text-sm overflow-hidden border-r border-gray-100 last:border-r-0">
                                   {col === 'Categoria' ? (
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row[col] === 'Spam' ? 'bg-red-100 text-red-800' : row[col] === 'Affiliazione' ? 'bg-purple-100 text-purple-800' : row[col] === 'Article Marketing' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{row[col]}</span>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                      row[col] === 'Spam' ? 'bg-red-100 text-red-800' : 
+                                      row[col] === 'Affiliazione / Sponsored' ? 'bg-purple-100 text-purple-800' : 
+                                      row[col] === 'Article Marketing' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {row[col]}
+                                    </span>
                                   ) : (
                                     <EditableCell value={row[col]} isUrl={col.toLowerCase().includes('url')} onSave={(newVal) => handleCellEdit(row._id, col, newVal)} />
                                   )}
@@ -425,7 +519,7 @@
                             </tr>
                           ))
                         ) : (
-                          <tr><td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-gray-500 text-sm">Nessun risultato.</td></tr>
+                          <tr><td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-gray-500 text-sm">Nessun risultato in questa categoria.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -437,7 +531,7 @@
                         <span>Mostrando da <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> a <span className="font-medium">{Math.min(currentPage * pageSize, filteredData.length)}</span> di <span className="font-medium">{filteredData.length}</span> risultati</span>
                         
                         <div className="flex items-center gap-2 border-l border-gray-300 pl-3 ml-1">
-                          <label htmlFor="pageSizeSelect" className="font-medium">Righe per pagina:</label>
+                          <label htmlFor="pageSizeSelect" className="font-medium">Righe:</label>
                           <select 
                             id="pageSizeSelect" 
                             value={pageSizeConfig} 
@@ -476,40 +570,44 @@
               <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
                 <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-gray-50/50">
                   <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Icon path={icons.info} className="text-blue-600" size={20} /> Logiche di Categorizzazione (Avanzate)
+                    <Icon path={icons.info} className="text-blue-600" size={20} /> Logiche di Categorizzazione
                   </h3>
                   <button onClick={() => setIsInfoOpen(false)} className="text-gray-400 hover:text-gray-600 p-1">
                     <Icon path={icons.x} size={20} />
                   </button>
                 </div>
-                <div className="p-5 space-y-5 text-sm text-gray-600">
+                <div className="p-5 space-y-5 text-sm text-gray-600 max-h-[70vh] overflow-y-auto">
+                  
                   <div className="bg-red-50 border border-red-100 rounded-xl p-4">
                     <h4 className="font-semibold text-red-800 mb-2">1. Spam</h4>
                     <ul className="list-disc pl-4 space-y-1">
                       <li>Il dominio finisce per .xyz, .top, .click, ecc.</li>
                       <li>Il testo contiene termini spam: <em>telegram, seo, traffic...</em></li>
                       <li>Oltre 4 pagine differenti all'interno dell'export possiedono lo stesso esatto titolo.</li>
-                      <li><strong>[Nuovo]</strong> Il link proviene da un sottodominio di terzo livello (es. <em>blog.dominio.it</em>).</li>
+                      <li>Il link proviene da un sottodominio di terzo livello (es. <em>blog.dominio.it</em>).</li>
                     </ul>
                   </div>
+                  
                   <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
-                    <h4 className="font-semibold text-purple-800 mb-2">2. Affiliazione</h4>
+                    <h4 className="font-semibold text-purple-800 mb-2">2. Affiliazione / Sponsored</h4>
                     <ul className="list-disc pl-4 space-y-1">
-                      <li>Il testo contiene termini relativi al betting: <em>quote, pronostici, bonus...</em></li>
+                      <li>Il testo contiene termini relativi al betting: <em>quote, pronostici, bonus...</em> oppure promozionali: <em>sponsored, advertorial</em>.</li>
                       <li>L'anchor text è una URL cruda o contiene valute (€, $) o percentuali di bonus.</li>
                       <li>L'anchor text è composto esclusivamente da numeri o decimali (es. <em>1.50</em>).</li>
                     </ul>
                   </div>
+                  
                   <div className="bg-green-50 border border-green-100 rounded-xl p-4">
                     <h4 className="font-semibold text-green-800 mb-2">3. Article Marketing</h4>
                     <ul className="list-disc pl-4 space-y-1">
                       <li>Il dominio è principale (non un sottodominio), ha estensioni standard ed è di una lunghezza naturale.</li>
-                      <li>Nessuna presenza di indicatori Spam o di Affiliazione.</li>
+                      <li>Nessuna presenza di indicatori Spam o di Affiliazione/Sponsored.</li>
                       <li>L'anchor text è discorsivo: contiene spazi ed è lungo almeno 6 caratteri.</li>
-                      <li><strong>[Nuovo]</strong> Il titolo è discorsivo (min. 10 caratteri con spazi).</li>
-                      <li><strong>[Nuovo]</strong> L'URL del link ha la tipica struttura di un articolo (contiene date nel formato <em>/anno/mese/</em> o permalink con almeno 3 trattini).</li>
+                      <li><strong>[Nuovo]</strong> Il titolo è discorsivo e contiene parole tipiche della <strong>lingua italiana</strong> (per escludere titoli stranieri, anche su domini .it).</li>
+                      <li>L'URL del link ha la tipica struttura di un articolo (contiene date nel formato <em>/anno/mese/</em> o permalink con almeno 3 trattini).</li>
                     </ul>
                   </div>
+
                 </div>
                 <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
                   <button onClick={() => setIsInfoOpen(false)} className="bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700">Chiudi</button>
