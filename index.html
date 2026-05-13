@@ -61,11 +61,17 @@
         hostname = urlObj.hostname;
       } catch (e) { }
 
+      // Analisi Dominio / Sottodominio
+      const domainParts = hostname.replace(/^www\./, '').split('.');
+      // Consideriamo sottodominio se ci sono più di 2 parti (es. blog.dominio.it) ignorando casi come .co.uk (anche se rari per mercato IT)
+      const isSubdomain = domainParts.length > 2 && !hostname.endsWith('.co.uk') && !hostname.endsWith('.gov.it');
+
       // 1. SPAM
       let isSpam = false;
       if (SPAM_TLDS.some(tld => hostname.endsWith(tld))) isSpam = true;
       if (SPAM_KEYWORDS.some(kw => combinedText.includes(kw))) isSpam = true;
       if (title && titleCounts[title] > 4) isSpam = true; 
+      if (isSubdomain) isSpam = true; // Sottodomini classificati come probabile spam
       if (isSpam) return 'Spam';
 
       // 2. AFFILIAZIONE
@@ -82,11 +88,21 @@
       let isArticle = false;
       const validTlds = ['.it', '.com', '.net', '.org', '.eu', '.info', '.blog'];
       const hasValidTld = validTlds.some(tld => hostname.endsWith(tld));
-      if (hasValidTld) {
-        const domainParts = hostname.replace(/^www\./, '').split('.');
+      
+      // Deve essere un dominio principale (non sottodominio) con TLD valido
+      if (hasValidTld && !isSubdomain) {
         const domainName = domainParts[0];
+        
+        // Anchor naturale discorsivo
         const isNaturalAnchor = anchor.includes(' ') && anchor.length > 5 && !isAnchorUrl;
-        if (domainName.length < 25 && !combinedText.includes('forum') && !combinedText.includes('directory') && isNaturalAnchor) {
+        
+        // Titolo naturale discorsivo
+        const isNaturalTitle = title.includes(' ') && title.length > 10;
+        
+        // Struttura URL tipica da articolo: contiene data (es. /2026/02/) o permalink con almeno 3 trattini
+        const hasArticleStructure = /\/\d{4}\/\d{2}/.test(url) || ((url.match(/-/g) || []).length >= 3);
+
+        if (domainName.length < 25 && !combinedText.includes('forum') && !combinedText.includes('directory') && isNaturalAnchor && isNaturalTitle && hasArticleStructure) {
           isArticle = true;
         }
       }
@@ -473,6 +489,7 @@
                       <li>Il dominio finisce per .xyz, .top, .click, ecc.</li>
                       <li>Il testo contiene termini spam: <em>telegram, seo, traffic...</em></li>
                       <li>Oltre 4 pagine differenti all'interno dell'export possiedono lo stesso esatto titolo.</li>
+                      <li><strong>[Nuovo]</strong> Il link proviene da un sottodominio di terzo livello (es. <em>blog.dominio.it</em>).</li>
                     </ul>
                   </div>
                   <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
@@ -486,9 +503,11 @@
                   <div className="bg-green-50 border border-green-100 rounded-xl p-4">
                     <h4 className="font-semibold text-green-800 mb-2">3. Article Marketing</h4>
                     <ul className="list-disc pl-4 space-y-1">
-                      <li>Il dominio ha estensioni standard ed è di una lunghezza naturale.</li>
+                      <li>Il dominio è principale (non un sottodominio), ha estensioni standard ed è di una lunghezza naturale.</li>
                       <li>Nessuna presenza di indicatori Spam o di Affiliazione.</li>
-                      <li>L'anchor text è "discorsivo": contiene spazi ed è lungo almeno 6 caratteri.</li>
+                      <li>L'anchor text è discorsivo: contiene spazi ed è lungo almeno 6 caratteri.</li>
+                      <li><strong>[Nuovo]</strong> Il titolo è discorsivo (min. 10 caratteri con spazi).</li>
+                      <li><strong>[Nuovo]</strong> L'URL del link ha la tipica struttura di un articolo (contiene date nel formato <em>/anno/mese/</em> o permalink con almeno 3 trattini).</li>
                     </ul>
                   </div>
                 </div>
