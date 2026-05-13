@@ -342,8 +342,8 @@
         const startWidth = th.offsetWidth;
         
         const onMouseMove = (moveEvent) => {
-          // Permettiamo di stringere la colonna fino a soli 20px (testo smozzicato)
-          const newWidth = Math.max(20, startWidth + (moveEvent.clientX - startX));
+          // Permettiamo di stringere la colonna fino a soli 5px (praticamente invisibile, ma ri-cliccabile)
+          const newWidth = Math.max(5, startWidth + (moveEvent.clientX - startX));
           th.style.width = `${newWidth}px`;
         };
 
@@ -351,7 +351,7 @@
           document.removeEventListener('mousemove', onMouseMove);
           document.removeEventListener('mouseup', onMouseUp);
           
-          const finalWidth = Math.max(20, startWidth + (upEvent.clientX - startX));
+          const finalWidth = Math.max(5, startWidth + (upEvent.clientX - startX));
           setColWidths(prev => ({ ...prev, [col]: finalWidth }));
         };
 
@@ -484,7 +484,7 @@
                           {headers.filter(h => visibleColumns.includes(h)).map(col => (
                             <th 
                               key={col} 
-                              className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 last:border-r-0 group select-none relative"
+                              className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 last:border-r-0 group select-none relative overflow-hidden"
                               style={{ width: colWidths[col] || DEFAULT_WIDTHS[col] || 150 }}
                             >
                               <div className="truncate">{col}</div>
