@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backlink Analyzer Pro - Semrush Tool</title>
+  
+  <!-- Caricamento Tailwind per la grafica -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Caricamento React e Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* Piccole ottimizzazioni UI */
+    .tooltip-trigger:hover .tooltip-content { display: block; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+  
+  <div id="root"></div>
+
+  <!-- Il codice dell'applicazione React -->
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // --- COMPONENTI ICONE (Sostituiscono Lucide) ---
+    const Icon = ({ path, size = 24, className = "" }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{ __html: path }} />
+    );
+    const icons = {
+      upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
+      download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>',
+      info: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>',
+      settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+      edit: '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>',
+      external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>',
+      chevronLeft: '<polyline points="15 18 9 12 15 6"></polyline>',
+      chevronRight: '<polyline points="9 18 15 12 9 6"></polyline>',
+      x: '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>',
+      spreadsheet: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M8 13h2"></path><path d="M8 17h2"></path><path d="M14 13h2"></path><path d="M14 17h2"></path>'
+    };
+
+    // --- LOGICA DI CATEGORIZZAZIONE ---
+    const SPAM_TLDS = ['.xyz', '.top', '.click', '.monster', '.space', '.pw', '.cc', '.ru', '.tokyo', '.icu'];
+    const SPAM_KEYWORDS = ['telegram', 'seo', 'traffic', 'backlink', 'index', 'black hat', 'pbn', 'anomaly', 'boost', 'viagra', 'cialis', 'porn'];
+    const AFFILIATE_KEYWORDS = ['quote', 'pronostic', 'bonus', 'scommess', 'match', 'bookmaker', 'comparazion', 'migliori', 'schedin', 'betting', 'casino', 'slot', 'poker', 'odds'];
+
+    const categorizeRow = (rowObj) => {
+      const url = (rowObj['Source url'] || '').toLowerCase();
+      const title = (rowObj['Source title'] || '').toLowerCase();
+      const anchor = (rowObj['Anchor'] || '').toLowerCase();
+      
+      const combinedText = `${url} ${title} ${anchor}`;
+
+      let hostname = '';
+      try {
+        const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+        hostname = urlObj.hostname;
+      } catch (e) { }
+
+      let isSpam = false;
+      if (SPAM_TLDS.some(tld => hostname.endsWith(tld))) isSpam = true;
+      if (SPAM_KEYWORDS.some(kw => combinedText.includes(kw))) isSpam = true;
+      if (isSpam) return 'Spam';
+
+      if (AFFILIATE_KEYWORDS.some(kw => combinedText.includes(kw))) return 'Affiliazione';
+
+      let isArticle = false;
+      if (hostname.endsWith('.it')) {
+        const domainParts = hostname.replace(/^www\./, '').split('.');
+        const domainName = domainParts[0];
+        if (domainName.length < 25 && !combinedText.includes('forum') && !combinedText.includes('directory')) {
+          isArticle = true;
+        }
+      }
+      if (isArticle) return 'Article Marketing';
+
+      return 'Non Categorizzato';
+    };
+
+    // --- PARSER CSV CUSTOM ---
+    const parseCSV = (text) => {
+      const rows = [];
+      let row = [];
+      let curr = '';
+      let inQuotes = false;
+      
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (inQuotes) {
+          if (char === '"') {
+            if (i + 1 < text.length && text[i + 1] === '"') {
+              curr += '"';
+              i++;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            curr += char;
+          }
+        } else {
+          if (char === '"') {
+            inQuotes = true;
+          } else if (char === ',') {
+            row.push(curr);
+            curr = '';
+          } else if (char === '\n' || char === '\r') {
+            row.push(curr);
+            rows.push(row);
+            row = [];
+            curr = '';
+            if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
+              i++;
+            }
+          } else {
+            curr += char;
+          }
+        }
+      }
+      if (curr !== '' || row.length > 0) {
+        row.push(curr);
+        rows.push(row);
+      }
+      return rows.filter(r => r.length > 0 && r.some(c => c.trim() !== ''));
+    };
+
+    const convertToCSV = (dataArray, columns) => {
+      const escapeCell = (cell) => {
+        if (cell === null || cell === undefined) return '';
+        const str = String(cell);
+        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+      const header = columns.map(escapeCell).join(',');
+      const rows = dataArray.map(obj => columns.map(col => escapeCell(obj[col] || '')).join(','));
+      return [header, ...rows].join('\n');
+    };
+
+    // --- COMPONENTI UI ---
+    const EditableCell = ({ value, isUrl, onSave }) => {
+      const [isEditing, setIsEditing] = useState(false);
+      const [val, setVal] = useState(value);
+
+      const handleBlur = () => {
+        setIsEditing(false);
+        if (val !== value) onSave(val);
+      };
+
+      if (isEditing) {
+        return (
+          <input 
+            autoFocus 
+            value={val} 
+            onChange={e => setVal(e.target.value)} 
+            onBlur={handleBlur}
+            onKeyDown={e => e.key === 'Enter' && handleBlur()}
+            className="border border-blue-500 p-1 w-full text-sm text-gray-900 rounded outline-none"
+          />
+        );
+      }
+
+      const displayVal = value || '-';
+
+      return (
+        <div className="group flex items-center gap-2 max-w-xs sm:max-w-sm md:max-w-md lg:max-w-lg">
+          <div className="truncate flex-1" title={value}>
+            {isUrl && value ? (
+              <a 
+                href={value.startsWith('http') ? value : `https://${value}`} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                onClick={e => e.stopPropagation()}
+              >
+                {displayVal}
+                <Icon path={icons.external} size={12} className="inline opacity-50" />
+              </a>
+            ) : (
+              <span className="text-gray-700">{displayVal}</span>
+            )}
+          </div>
+          <button 
+            onClick={() => setIsEditing(true)} 
+            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 transition-opacity flex-shrink-0"
+            title="Modifica cella"
+          >
+            <Icon path={icons.edit} size={14} />
+          </button>
+        </div>
+      );
+    };
+
+    // --- APP PRINCIPALE ---
+    const App = () => {
+      const [data, setData] = useState([]);
+      const [headers, setHeaders] = useState([]);
+      const [visibleColumns, setVisibleColumns] = useState([]);
+      const [activeTab, setActiveTab] = useState('Tutti');
+      const [isInfoOpen, setIsInfoOpen] = useState(false);
+      const [isColumnsMenuOpen, setIsColumnsMenuOpen] = useState(false);
+      
+      const [currentPage, setCurrentPage] = useState(1);
+      const pageSize = 50;
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const text = evt.target.result;
+          const parsedRows = parseCSV(text);
+          if (parsedRows.length < 2) {
+            alert("File CSV non valido o vuoto.");
+            return;
+          }
+          
+          const fileHeaders = parsedRows[0];
+          const parsedData = parsedRows.slice(1).map((rowArr, index) => {
+            const rowObj = { _id: index.toString() };
+            fileHeaders.forEach((h, i) => { rowObj[h] = rowArr[i]; });
+            rowObj.Categoria = categorizeRow(rowObj);
+            return rowObj;
+          });
+
+          const defaultVisible = ['Categoria', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
+          const initialVisible = ['Categoria', ...fileHeaders].filter(h => defaultVisible.includes(h));
+          
+          setHeaders(['Categoria', ...fileHeaders]);
+          setVisibleColumns(initialVisible.length > 0 ? initialVisible : ['Categoria', ...fileHeaders.slice(0, 4)]);
+          setData(parsedData);
+          setCurrentPage(1);
+        };
+        reader.readAsText(file);
+      };
+
+      const handleCellEdit = (rowId, column, newValue) => {
+        setData(prev => prev.map(row => {
+          if (row._id === rowId) {
+            const updatedRow = { ...row, [column]: newValue };
+            if (['Source url', 'Source title', 'Anchor'].includes(column)) {
+              updatedRow.Categoria = categorizeRow(updatedRow);
+            }
+            return updatedRow;
+          }
+          return row;
+        }));
+      };
+
+      const toggleColumn = (col) => {
+        setVisibleColumns(prev => 
+          prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+        );
+      };
+
+      const downloadFile = (content, filename) => {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const filteredData = useMemo(() => {
+        if (activeTab === 'Tutti') return data;
+        return data.filter(d => d.Categoria === activeTab);
+      }, [data, activeTab]);
+
+      const totalPages = Math.ceil(filteredData.length / pageSize);
+      const paginatedData = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return filteredData.slice(start, start + pageSize);
+      }, [filteredData, currentPage]);
+
+      useEffect(() => { setCurrentPage(1); }, [activeTab]);
+
+      const TABS = ['Tutti', 'Spam', 'Article Marketing', 'Affiliazione', 'Non Categorizzato'];
+
+      return (
+        <div className="min-h-screen">
+          {/* Header */}
+          <header className="bg-white shadow-sm border-b border-gray-200">
+            <div className="max-w-screen-2xl mx-auto px-4 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-blue-600 p-2 rounded-lg text-white">
+                  <Icon path={icons.spreadsheet} size={24} />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-gray-900 leading-tight">Backlink Analyzer Pro</h1>
+                  <p className="text-xs text-gray-500">Semrush Data Categorizer</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <button onClick={() => setIsInfoOpen(true)} className="text-gray-500 hover:text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-colors" title="Informazioni sulle logiche">
+                  <Icon path={icons.info} size={20} />
+                </button>
+                
+                <label className="cursor-pointer bg-white border border-gray-300 text-gray-700 py-2 px-4 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
+                  <Icon path={icons.upload} size={16} />
+                  <span>Carica CSV</span>
+                  <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                </label>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content */}
+          <main className="max-w-screen-2xl mx-auto px-4 py-6">
+            {data.length === 0 ? (
+              <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 flex flex-col items-center justify-center text-center mt-10 shadow-sm">
+                <div className="bg-blue-50 text-blue-500 p-4 rounded-full mb-4">
+                  <Icon path={icons.upload} size={32} />
+                </div>
+                <h2 className="text-lg font-semibold text-gray-800 mb-2">Nessun file caricato</h2>
+                <p className="text-sm text-gray-500 max-w-md">Carica un file di export dei backlink generato da Semrush (formato .csv) per iniziare l'analisi automatica.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Toolbar */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col xl:flex-row justify-between gap-4 xl:items-center">
+                  <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
+                    {TABS.map(tab => {
+                      const count = tab === 'Tutti' ? data.length : data.filter(d => d.Categoria === tab).length;
+                      return (
+                        <button
+                          key={tab}
+                          onClick={() => setActiveTab(tab)}
+                          className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
+                        >
+                          {tab}
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-500'}`}>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center flex-wrap gap-2">
+                    <div className="relative">
+                      <button onClick={() => setIsColumnsMenuOpen(!isColumnsMenuOpen)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
+                        <Icon path={icons.settings} size={16} />
+                        <span>Gestione Colonne</span>
+                      </button>
+                      
+                      {isColumnsMenuOpen && (
+                        <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 z-20 max-h-96 overflow-y-auto p-2">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-2 pt-2">Colonne visibili</div>
+                          {headers.map(col => (
+                            <label key={col} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                              <input type="checkbox" checked={visibleColumns.includes(col)} onChange={() => toggleColumn(col)} className="rounded text-blue-600 cursor-pointer" />
+                              <span className="text-sm text-gray-700 truncate">{col}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button onClick={() => downloadFile(convertToCSV(filteredData, headers), `Semrush_${activeTab}.csv`)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
+                      <Icon path={icons.download} size={16} />
+                      <span>Scarica {activeTab}</span>
+                    </button>
+                    <button onClick={() => downloadFile(convertToCSV(data, headers), `Semrush_Completo.csv`)} className="bg-blue-600 text-white py-1.5 px-3 rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-medium">
+                      <Icon path={icons.download} size={16} />
+                      <span>Scarica Tutto</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tabella */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          {headers.filter(h => visibleColumns.includes(h)).map(col => (
+                            <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                        {paginatedData.length > 0 ? (
+                          paginatedData.map((row) => (
+                            <tr key={row._id} className="hover:bg-gray-50/50 transition-colors group">
+                              {headers.filter(h => visibleColumns.includes(h)).map(col => (
+                                <td key={col} className="px-4 py-2 text-sm">
+                                  {col === 'Categoria' ? (
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row[col] === 'Spam' ? 'bg-red-100 text-red-800' : row[col] === 'Affiliazione' ? 'bg-purple-100 text-purple-800' : row[col] === 'Article Marketing' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{row[col]}</span>
+                                  ) : (
+                                    <EditableCell value={row[col]} isUrl={col.toLowerCase().includes('url')} onSave={(newVal) => handleCellEdit(row._id, col, newVal)} />
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ))
+                        ) : (
+                          <tr><td colSpan={visibleColumns.length} className="px-4 py-8 text-center text-gray-500 text-sm">Nessun risultato.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  {/* Paginazione */}
+                  {totalPages > 1 && (
+                    <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+                      <div className="text-sm text-gray-500">
+                        Mostrando da <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> a <span className="font-medium">{Math.min(currentPage * pageSize, filteredData.length)}</span> di <span className="font-medium">{filteredData.length}</span> risultati
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded-md border border-gray-300 bg-white text-gray-600 disabled:opacity-50 hover:bg-gray-50">
+                          <Icon path={icons.chevronLeft} size={16} />
+                        </button>
+                        <span className="px-3 py-1 text-sm font-medium text-gray-700">Pagina {currentPage} di {totalPages}</span>
+                        <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-1 rounded-md border border-gray-300 bg-white text-gray-600 disabled:opacity-50 hover:bg-gray-50">
+                          <Icon path={icons.chevronRight} size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* Info Modal */}
+          {isInfoOpen && (
+            <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
+                <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-gray-50/50">
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <Icon path={icons.info} className="text-blue-600" size={20} /> Logiche di Categorizzazione
+                  </h3>
+                  <button onClick={() => setIsInfoOpen(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                    <Icon path={icons.x} size={20} />
+                  </button>
+                </div>
+                <div className="p-5 space-y-5 text-sm text-gray-600">
+                  <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+                    <h4 className="font-semibold text-red-800 mb-2">1. Spam</h4>
+                    <p>Dominio finisce in .xyz, .top, ecc. oppure contiene: telegram, seo, traffic, backlink, ecc.</p>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+                    <h4 className="font-semibold text-purple-800 mb-2">2. Affiliazione</h4>
+                    <p>Contiene termini relativi al betting: quote, pronostici, bonus, scommesse, ecc.</p>
+                  </div>
+                  <div className="bg-green-50 border border-green-100 rounded-xl p-4">
+                    <h4 className="font-semibold text-green-800 mb-2">3. Article Marketing</h4>
+                    <p>Dominio .it con lunghezza naturale e assenza di termini spam o affiliazione.</p>
+                  </div>
+                </div>
+                <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+                  <button onClick={() => setIsInfoOpen(false)} className="bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700">Chiudi</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
