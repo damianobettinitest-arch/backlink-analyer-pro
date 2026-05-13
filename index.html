@@ -67,13 +67,11 @@
     
     // Funzione euristica per rilevare se un titolo "sembra" italiano
     const isItalianTitle = (title) => {
-      // Normalizza il testo inserendo spazi extra per agevolare il matching esatto delle singole parole
       const lowerTitle = ` ${title.toLowerCase().replace(/[^\w\sàèéìòù]/g, ' ')} `;
       let matchCount = 0;
       for (const word of italianStopWords) {
         if (lowerTitle.includes(word)) {
           matchCount++;
-          // Se trova almeno 2 occorrenze di stop-words italiane, lo consideriamo "italiano"
           if (matchCount >= 2) return true;
         }
       }
@@ -83,7 +81,6 @@
     // --- LOGICA DI CATEGORIZZAZIONE ---
     const SPAM_TLDS = ['.xyz', '.top', '.click', '.monster', '.space', '.pw', '.cc', '.ru', '.tokyo', '.icu', '.club', '.online', '.site'];
     const SPAM_KEYWORDS = ['telegram', 'seo', 'traffic', 'backlink', 'index', 'black hat', 'pbn', 'anomaly', 'boost', 'viagra', 'cialis', 'porn', 'escort'];
-    // Aggiunte le keyword relative alle sponsorizzazioni e advertorial
     const AFFILIATE_KEYWORDS = ['quote', 'pronostic', 'bonus', 'scommess', 'match', 'bookmaker', 'comparazion', 'migliori', 'schedin', 'betting', 'casino', 'slot', 'poker', 'odds', 'freebet', 'sponsored', 'sponsorizzato', 'advertorial'];
 
     const categorizeRow = (rowObj, titleCounts = {}) => {
@@ -98,7 +95,6 @@
         hostname = urlObj.hostname;
       } catch (e) { }
 
-      // Analisi Dominio / Sottodominio
       const domainParts = hostname.replace(/^www\./, '').split('.');
       const isSubdomain = domainParts.length > 2 && !hostname.endsWith('.co.uk') && !hostname.endsWith('.gov.it');
 
@@ -119,7 +115,6 @@
       const isStrictNumber = /^\d+([.,]\d+)?$/.test(anchor);
       if (hasMoneyOrPromo || isStrictNumber) isAffiliate = true;
       
-      // Ritorniamo il nuovo nome della categoria
       if (isAffiliate) return 'Affiliazione / Sponsored';
 
       // 3. ARTICLE MARKETING
@@ -129,14 +124,8 @@
       
       if (hasValidTld && !isSubdomain) {
         const domainName = domainParts[0];
-        
-        // L'anchor deve essere discorsivo
         const isNaturalAnchor = anchor.includes(' ') && anchor.length > 5 && !isAnchorUrl;
-        
-        // Il titolo deve essere discorsivo E in italiano (escludiamo titoli in inglese anche su .it)
         const isNaturalTitle = title.includes(' ') && title.length > 10 && isItalianTitle(title);
-        
-        // Struttura URL tipica da articolo
         const hasArticleStructure = /\/\d{4}\/\d{2}/.test(url) || ((url.match(/-/g) || []).length >= 3);
 
         if (domainName.length < 25 && !combinedText.includes('forum') && !combinedText.includes('directory') && isNaturalAnchor && isNaturalTitle && hasArticleStructure) {
@@ -149,7 +138,6 @@
       return 'Non Categorizzato';
     };
 
-    // Helper globale per check .it
     const isItDomain = (url) => {
       try {
         const urlStr = (url || '').toLowerCase().trim();
@@ -201,6 +189,7 @@
     const DEFAULT_WIDTHS = {
       'First seen': 120,
       'Categoria': 200,
+      'Dominio': 180,
       'Source title': 350,
       'Source url': 350,
       'Anchor': 250,
@@ -290,6 +279,18 @@
             const rowObj = { _id: index.toString() };
             fileHeaders.forEach((h, i) => { rowObj[h] = rowArr[i]; });
             rowObj.Categoria = categorizeRow(rowObj, newTitleCounts);
+            
+            // Estrazione del Dominio Pulito
+            let pulito = '';
+            try {
+              const urlStr = (rowObj['Source url'] || '').trim();
+              if (urlStr) {
+                const urlObj = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
+                pulito = urlObj.hostname.replace(/^www\./, '');
+              }
+            } catch(e) {}
+            rowObj['Dominio'] = pulito;
+
             return rowObj;
           });
 
@@ -301,12 +302,12 @@
           const fsIndex = displayHeaders.indexOf('First seen');
           if (fsIndex !== -1) displayHeaders.splice(fsIndex, 1);
           
-          const headersWithCat = ['First seen', 'Categoria', ...displayHeaders];
-          const defaultVisible = ['First seen', 'Categoria', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
+          const headersWithCat = ['First seen', 'Categoria', 'Dominio', ...displayHeaders];
+          const defaultVisible = ['First seen', 'Categoria', 'Dominio', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
           const initialVisible = headersWithCat.filter(h => defaultVisible.includes(h));
           
           setHeaders(headersWithCat);
-          setVisibleColumns(initialVisible.length > 0 ? initialVisible : ['First seen', 'Categoria', ...displayHeaders.slice(0, 3)]);
+          setVisibleColumns(initialVisible.length > 0 ? initialVisible : ['First seen', 'Categoria', 'Dominio', ...displayHeaders.slice(0, 3)]);
           setData(parsedData);
           setCurrentPage(1);
         };
@@ -341,9 +342,8 @@
         const startWidth = th.offsetWidth;
         
         const onMouseMove = (moveEvent) => {
-          // Utilizziamo un minWidth di 60px
-          const newWidth = Math.max(60, startWidth + (moveEvent.clientX - startX));
-          // Aggiorniamo il DOM live (più fluido di setState)
+          // Permettiamo di stringere la colonna fino a soli 20px (testo smozzicato)
+          const newWidth = Math.max(20, startWidth + (moveEvent.clientX - startX));
           th.style.width = `${newWidth}px`;
         };
 
@@ -351,7 +351,7 @@
           document.removeEventListener('mousemove', onMouseMove);
           document.removeEventListener('mouseup', onMouseUp);
           
-          const finalWidth = Math.max(60, startWidth + (upEvent.clientX - startX));
+          const finalWidth = Math.max(20, startWidth + (upEvent.clientX - startX));
           setColWidths(prev => ({ ...prev, [col]: finalWidth }));
         };
 
@@ -484,7 +484,7 @@
                           {headers.filter(h => visibleColumns.includes(h)).map(col => (
                             <th 
                               key={col} 
-                              className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 last:border-r-0 group select-none"
+                              className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-r border-gray-200 last:border-r-0 group select-none relative"
                               style={{ width: colWidths[col] || DEFAULT_WIDTHS[col] || 150 }}
                             >
                               <div className="truncate">{col}</div>
@@ -603,7 +603,7 @@
                       <li>Il dominio è principale (non un sottodominio), ha estensioni standard ed è di una lunghezza naturale.</li>
                       <li>Nessuna presenza di indicatori Spam o di Affiliazione/Sponsored.</li>
                       <li>L'anchor text è discorsivo: contiene spazi ed è lungo almeno 6 caratteri.</li>
-                      <li><strong>[Nuovo]</strong> Il titolo è discorsivo e contiene parole tipiche della <strong>lingua italiana</strong> (per escludere titoli stranieri, anche su domini .it).</li>
+                      <li>Il titolo è discorsivo e contiene parole tipiche della <strong>lingua italiana</strong> (per escludere titoli stranieri, anche su domini .it).</li>
                       <li>L'URL del link ha la tipica struttura di un articolo (contiene date nel formato <em>/anno/mese/</em> o permalink con almeno 3 trattini).</li>
                     </ul>
                   </div>
