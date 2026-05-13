@@ -27,7 +27,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // --- COMPONENTI ICONE (Sostituiscono Lucide) ---
+    // --- COMPONENTI ICONE ---
     const Icon = ({ path, size = 24, className = "" }) => (
       <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{ __html: path }} />
     );
@@ -49,12 +49,10 @@
     const SPAM_KEYWORDS = ['telegram', 'seo', 'traffic', 'backlink', 'index', 'black hat', 'pbn', 'anomaly', 'boost', 'viagra', 'cialis', 'porn', 'escort'];
     const AFFILIATE_KEYWORDS = ['quote', 'pronostic', 'bonus', 'scommess', 'match', 'bookmaker', 'comparazion', 'migliori', 'schedin', 'betting', 'casino', 'slot', 'poker', 'odds', 'freebet'];
 
-    // titleCounts è una mappa passata per verificare titoli duplicati in massa
     const categorizeRow = (rowObj, titleCounts = {}) => {
       const url = (rowObj['Source url'] || '').toLowerCase().trim();
       const title = (rowObj['Source title'] || '').toLowerCase().trim();
       const anchor = (rowObj['Anchor'] || '').toLowerCase().trim();
-      
       const combinedText = `${url} ${title} ${anchor}`;
 
       let hostname = '';
@@ -63,53 +61,47 @@
         hostname = urlObj.hostname;
       } catch (e) { }
 
-      // 1. CONTROLLO SPAM
+      // 1. SPAM
       let isSpam = false;
       if (SPAM_TLDS.some(tld => hostname.endsWith(tld))) isSpam = true;
       if (SPAM_KEYWORDS.some(kw => combinedText.includes(kw))) isSpam = true;
-      // Se lo stesso identico titolo appare più di 4 volte nell'export, è molto probabile che sia spam (es. comment spam, bot)
       if (title && titleCounts[title] > 4) isSpam = true; 
-      
       if (isSpam) return 'Spam';
 
-      // 2. CONTROLLO AFFILIAZIONE
+      // 2. AFFILIAZIONE
       let isAffiliate = false;
       if (AFFILIATE_KEYWORDS.some(kw => combinedText.includes(kw))) isAffiliate = true;
-      
-      // Se l'anchor contiene "www." o è formattato come "nomesito.it" senza spazi, è un URL preciso
       const isAnchorUrl = anchor.includes('www.') || anchor.startsWith('http') || (anchor.includes('.it') && !anchor.includes(' ')) || (anchor.includes('.com') && !anchor.includes(' '));
       if (isAnchorUrl) isAffiliate = true;
-
-      // Se l'anchor contiene simboli di valuta, percentuale, o parole legate ai soldi
       const hasMoneyOrPromo = /\d+\s*(€|euro|\$|£|%)/i.test(anchor) || /[€$£]\s*\d+/.test(anchor);
-      // Se l'anchor è esattamente un numero (es. "1.50" o "100" tipico delle quote)
       const isStrictNumber = /^\d+([.,]\d+)?$/.test(anchor);
-      
       if (hasMoneyOrPromo || isStrictNumber) isAffiliate = true;
-
       if (isAffiliate) return 'Affiliazione';
 
-      // 3. CONTROLLO ARTICLE MARKETING
+      // 3. ARTICLE MARKETING
       let isArticle = false;
       const validTlds = ['.it', '.com', '.net', '.org', '.eu', '.info', '.blog'];
       const hasValidTld = validTlds.some(tld => hostname.endsWith(tld));
-      
       if (hasValidTld) {
         const domainParts = hostname.replace(/^www\./, '').split('.');
         const domainName = domainParts[0];
-        
-        // Anchor naturale: ha spazi (discorsivo), lungo almeno 6 caratteri, non è un url crudo
         const isNaturalAnchor = anchor.includes(' ') && anchor.length > 5 && !isAnchorUrl;
-        
         if (domainName.length < 25 && !combinedText.includes('forum') && !combinedText.includes('directory') && isNaturalAnchor) {
           isArticle = true;
         }
       }
-      
       if (isArticle) return 'Article Marketing';
 
       // 4. FALLBACK
       return 'Non Categorizzato';
+    };
+
+    // Helper globale per check .it
+    const isItDomain = (url) => {
+      try {
+        const urlStr = (url || '').toLowerCase().trim();
+        return new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`).hostname.endsWith('.it');
+      } catch(e) { return false; }
     };
 
     // --- PARSER CSV CUSTOM ---
@@ -118,43 +110,23 @@
       let row = [];
       let curr = '';
       let inQuotes = false;
-      
       for (let i = 0; i < text.length; i++) {
         const char = text[i];
         if (inQuotes) {
           if (char === '"') {
-            if (i + 1 < text.length && text[i + 1] === '"') {
-              curr += '"';
-              i++;
-            } else {
-              inQuotes = false;
-            }
-          } else {
-            curr += char;
-          }
+            if (i + 1 < text.length && text[i + 1] === '"') { curr += '"'; i++; } 
+            else { inQuotes = false; }
+          } else { curr += char; }
         } else {
-          if (char === '"') {
-            inQuotes = true;
-          } else if (char === ',') {
-            row.push(curr);
-            curr = '';
-          } else if (char === '\n' || char === '\r') {
-            row.push(curr);
-            rows.push(row);
-            row = [];
-            curr = '';
-            if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
-              i++;
-            }
-          } else {
-            curr += char;
-          }
+          if (char === '"') { inQuotes = true; } 
+          else if (char === ',') { row.push(curr); curr = ''; } 
+          else if (char === '\n' || char === '\r') {
+            row.push(curr); rows.push(row); row = []; curr = '';
+            if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') { i++; }
+          } else { curr += char; }
         }
       }
-      if (curr !== '' || row.length > 0) {
-        row.push(curr);
-        rows.push(row);
-      }
+      if (curr !== '' || row.length > 0) { row.push(curr); rows.push(row); }
       return rows.filter(r => r.length > 0 && r.some(c => c.trim() !== ''));
     };
 
@@ -201,25 +173,12 @@
         <div className="group flex items-center gap-2 max-w-xs sm:max-w-sm md:max-w-md lg:max-w-lg">
           <div className="truncate flex-1" title={value}>
             {isUrl && value ? (
-              <a 
-                href={value.startsWith('http') ? value : `https://${value}`} 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
-                onClick={e => e.stopPropagation()}
-              >
-                {displayVal}
-                <Icon path={icons.external} size={12} className="inline opacity-50" />
+              <a href={value.startsWith('http') ? value : `https://${value}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                {displayVal} <Icon path={icons.external} size={12} className="inline opacity-50" />
               </a>
-            ) : (
-              <span className="text-gray-700">{displayVal}</span>
-            )}
+            ) : ( <span className="text-gray-700">{displayVal}</span> )}
           </div>
-          <button 
-            onClick={() => setIsEditing(true)} 
-            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 transition-opacity flex-shrink-0"
-            title="Modifica cella"
-          >
+          <button onClick={() => setIsEditing(true)} className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-600 transition-opacity flex-shrink-0" title="Modifica cella">
             <Icon path={icons.edit} size={14} />
           </button>
         </div>
@@ -237,7 +196,7 @@
       const [titleCounts, setTitleCounts] = useState({});
       
       const [currentPage, setCurrentPage] = useState(1);
-      const pageSize = 50;
+      const [pageSizeConfig, setPageSizeConfig] = useState(50);
 
       const handleFileUpload = (e) => {
         const file = e.target.files[0];
@@ -247,15 +206,11 @@
         reader.onload = (evt) => {
           const text = evt.target.result;
           const parsedRows = parseCSV(text);
-          if (parsedRows.length < 2) {
-            alert("File CSV non valido o vuoto.");
-            return;
-          }
+          if (parsedRows.length < 2) { alert("File CSV non valido o vuoto."); return; }
           
           const fileHeaders = parsedRows[0];
           const titleIdx = fileHeaders.indexOf('Source title');
           
-          // Fase 1: Calcola le frequenze dei titoli (Logica Spam "Molte pagine stesso titolo")
           const newTitleCounts = {};
           if (titleIdx !== -1) {
             parsedRows.slice(1).forEach(rowArr => {
@@ -265,7 +220,6 @@
           }
           setTitleCounts(newTitleCounts);
 
-          // Fase 2: Mappatura dati e Categorizzazione
           const parsedData = parsedRows.slice(1).map((rowArr, index) => {
             const rowObj = { _id: index.toString() };
             fileHeaders.forEach((h, i) => { rowObj[h] = rowArr[i]; });
@@ -273,12 +227,21 @@
             return rowObj;
           });
 
-          // Colonne di default
-          const defaultVisible = ['Categoria', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
-          const initialVisible = ['Categoria', ...fileHeaders].filter(h => defaultVisible.includes(h));
+          // ORDINAMENTO CRONOLOGICO DECRESCENTE (Basato su First seen se presente)
+          parsedData.sort((a, b) => (b['First seen'] || '').localeCompare(a['First seen'] || ''));
+
+          // PREPARAZIONE INTESTAZIONI: FORZA "First seen" IN CIMA
+          const displayHeaders = [...fileHeaders];
+          const fsIndex = displayHeaders.indexOf('First seen');
+          if (fsIndex !== -1) displayHeaders.splice(fsIndex, 1);
           
-          setHeaders(['Categoria', ...fileHeaders]);
-          setVisibleColumns(initialVisible.length > 0 ? initialVisible : ['Categoria', ...fileHeaders.slice(0, 4)]);
+          const headersWithCat = ['First seen', 'Categoria', ...displayHeaders];
+          
+          const defaultVisible = ['First seen', 'Categoria', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
+          const initialVisible = headersWithCat.filter(h => defaultVisible.includes(h));
+          
+          setHeaders(headersWithCat);
+          setVisibleColumns(initialVisible.length > 0 ? initialVisible : ['First seen', 'Categoria', ...displayHeaders.slice(0, 3)]);
           setData(parsedData);
           setCurrentPage(1);
         };
@@ -290,7 +253,6 @@
           if (row._id === rowId) {
             const updatedRow = { ...row, [column]: newValue };
             if (['Source url', 'Source title', 'Anchor'].includes(column)) {
-              // Ricalcola la categoria mantenendo i vecchi titleCounts globali
               updatedRow.Categoria = categorizeRow(updatedRow, titleCounts);
             }
             return updatedRow;
@@ -300,18 +262,15 @@
       };
 
       const toggleColumn = (col) => {
-        setVisibleColumns(prev => 
-          prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
-        );
+        if (col === 'First seen') return; // Impedisce di nascondere First seen
+        setVisibleColumns(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
       };
 
       const downloadFile = (content, filename) => {
         const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", filename);
-        link.style.visibility = 'hidden';
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -319,22 +278,25 @@
 
       const filteredData = useMemo(() => {
         if (activeTab === 'Tutti') return data;
+        if (activeTab === 'Domini .it') return data.filter(d => isItDomain(d['Source url']));
         return data.filter(d => d.Categoria === activeTab);
       }, [data, activeTab]);
 
+      // Gestione paginazione calcolata in base alla config (Numero o 'All')
+      const pageSize = pageSizeConfig === 'All' ? Math.max(1, filteredData.length) : pageSizeConfig;
       const totalPages = Math.ceil(filteredData.length / pageSize);
+      
       const paginatedData = useMemo(() => {
         const start = (currentPage - 1) * pageSize;
         return filteredData.slice(start, start + pageSize);
-      }, [filteredData, currentPage]);
+      }, [filteredData, currentPage, pageSize]);
 
-      useEffect(() => { setCurrentPage(1); }, [activeTab]);
+      useEffect(() => { setCurrentPage(1); }, [activeTab, pageSizeConfig]);
 
-      const TABS = ['Tutti', 'Spam', 'Article Marketing', 'Affiliazione', 'Non Categorizzato'];
+      const TABS = ['Tutti', 'Spam', 'Article Marketing', 'Affiliazione', 'Non Categorizzato', 'Domini .it'];
 
       return (
         <div className="min-h-screen">
-          {/* Header */}
           <header className="bg-white shadow-sm border-b border-gray-200">
             <div className="max-w-screen-2xl mx-auto px-4 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -351,7 +313,6 @@
                 <button onClick={() => setIsInfoOpen(true)} className="text-gray-500 hover:text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-colors" title="Informazioni sulle logiche">
                   <Icon path={icons.info} size={20} />
                 </button>
-                
                 <label className="cursor-pointer bg-white border border-gray-300 text-gray-700 py-2 px-4 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
                   <Icon path={icons.upload} size={16} />
                   <span>Carica CSV</span>
@@ -361,7 +322,6 @@
             </div>
           </header>
 
-          {/* Main Content */}
           <main className="max-w-screen-2xl mx-auto px-4 py-6">
             {data.length === 0 ? (
               <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 flex flex-col items-center justify-center text-center mt-10 shadow-sm">
@@ -373,17 +333,23 @@
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Toolbar */}
+                
+                {/* Info Tab Domini .it */}
+                {activeTab === 'Domini .it' && (
+                  <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-xl text-sm flex items-start gap-3 shadow-sm">
+                    <Icon path={icons.info} size={20} className="mt-0.5 flex-shrink-0 text-blue-600" />
+                    <p><strong>Nota:</strong> Questa scheda filtra ed espone <em>tutti</em> i link provenienti da domini <strong>.it</strong>, senza distinzione di categoria (Spam, Affiliazione, Article, ecc.). Come richiesto, l'ordinamento rimane cronologico decrescente.</p>
+                  </div>
+                )}
+
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 flex flex-col xl:flex-row justify-between gap-4 xl:items-center">
                   <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
                     {TABS.map(tab => {
-                      const count = tab === 'Tutti' ? data.length : data.filter(d => d.Categoria === tab).length;
+                      const count = tab === 'Tutti' ? data.length : 
+                                    tab === 'Domini .it' ? data.filter(d => isItDomain(d['Source url'])).length :
+                                    data.filter(d => d.Categoria === tab).length;
                       return (
-                        <button
-                          key={tab}
-                          onClick={() => setActiveTab(tab)}
-                          className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}
-                        >
+                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}>
                           {tab}
                           <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-500'}`}>{count}</span>
                         </button>
@@ -394,16 +360,14 @@
                   <div className="flex items-center flex-wrap gap-2">
                     <div className="relative">
                       <button onClick={() => setIsColumnsMenuOpen(!isColumnsMenuOpen)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
-                        <Icon path={icons.settings} size={16} />
-                        <span>Gestione Colonne</span>
+                        <Icon path={icons.settings} size={16} /> <span>Gestione Colonne</span>
                       </button>
-                      
                       {isColumnsMenuOpen && (
                         <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 z-20 max-h-96 overflow-y-auto p-2">
                           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-2 pt-2">Colonne visibili</div>
                           {headers.map(col => (
-                            <label key={col} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                              <input type="checkbox" checked={visibleColumns.includes(col)} onChange={() => toggleColumn(col)} className="rounded text-blue-600 cursor-pointer" />
+                            <label key={col} className={`flex items-center gap-3 p-2 rounded cursor-pointer ${col === 'First seen' ? 'opacity-50' : 'hover:bg-gray-50'}`}>
+                              <input type="checkbox" checked={visibleColumns.includes(col)} disabled={col === 'First seen'} onChange={() => toggleColumn(col)} className="rounded text-blue-600 cursor-pointer disabled:cursor-not-allowed" />
                               <span className="text-sm text-gray-700 truncate">{col}</span>
                             </label>
                           ))}
@@ -411,17 +375,14 @@
                       )}
                     </div>
                     <button onClick={() => downloadFile(convertToCSV(filteredData, headers), `Semrush_${activeTab}.csv`)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
-                      <Icon path={icons.download} size={16} />
-                      <span>Scarica {activeTab}</span>
+                      <Icon path={icons.download} size={16} /> <span>Scarica {activeTab}</span>
                     </button>
                     <button onClick={() => downloadFile(convertToCSV(data, headers), `Semrush_Completo.csv`)} className="bg-blue-600 text-white py-1.5 px-3 rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-medium">
-                      <Icon path={icons.download} size={16} />
-                      <span>Scarica Tutto</span>
+                      <Icon path={icons.download} size={16} /> <span>Scarica Tutto</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Tabella */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
@@ -454,21 +415,39 @@
                     </table>
                   </div>
                   
-                  {/* Paginazione */}
-                  {totalPages > 1 && (
-                    <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex items-center justify-between">
-                      <div className="text-sm text-gray-500">
-                        Mostrando da <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> a <span className="font-medium">{Math.min(currentPage * pageSize, filteredData.length)}</span> di <span className="font-medium">{filteredData.length}</span> risultati
+                  {filteredData.length > 0 && (
+                    <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex flex-wrap items-center justify-between gap-4">
+                      <div className="text-sm text-gray-500 flex items-center flex-wrap gap-2">
+                        <span>Mostrando da <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> a <span className="font-medium">{Math.min(currentPage * pageSize, filteredData.length)}</span> di <span className="font-medium">{filteredData.length}</span> risultati</span>
+                        
+                        <div className="flex items-center gap-2 border-l border-gray-300 pl-3 ml-1">
+                          <label htmlFor="pageSizeSelect" className="font-medium">Righe per pagina:</label>
+                          <select 
+                            id="pageSizeSelect" 
+                            value={pageSizeConfig} 
+                            onChange={(e) => setPageSizeConfig(e.target.value === 'All' ? 'All' : Number(e.target.value))} 
+                            className="bg-white border border-gray-300 rounded text-sm py-1 px-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value={10}>10</option>
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
+                            <option value={500}>500</option>
+                            <option value="All">Tutte</option>
+                          </select>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded-md border border-gray-300 bg-white text-gray-600 disabled:opacity-50 hover:bg-gray-50">
-                          <Icon path={icons.chevronLeft} size={16} />
-                        </button>
-                        <span className="px-3 py-1 text-sm font-medium text-gray-700">Pagina {currentPage} di {totalPages}</span>
-                        <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-1 rounded-md border border-gray-300 bg-white text-gray-600 disabled:opacity-50 hover:bg-gray-50">
-                          <Icon path={icons.chevronRight} size={16} />
-                        </button>
-                      </div>
+
+                      {totalPages > 1 && (
+                        <div className="flex gap-2">
+                          <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded-md border border-gray-300 bg-white text-gray-600 disabled:opacity-50 hover:bg-gray-50">
+                            <Icon path={icons.chevronLeft} size={16} />
+                          </button>
+                          <span className="px-3 py-1 text-sm font-medium text-gray-700">Pagina {currentPage} di {totalPages}</span>
+                          <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-1 rounded-md border border-gray-300 bg-white text-gray-600 disabled:opacity-50 hover:bg-gray-50">
+                            <Icon path={icons.chevronRight} size={16} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -476,7 +455,6 @@
             )}
           </main>
 
-          {/* Info Modal */}
           {isInfoOpen && (
             <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden">
@@ -489,35 +467,30 @@
                   </button>
                 </div>
                 <div className="p-5 space-y-5 text-sm text-gray-600">
-                  
                   <div className="bg-red-50 border border-red-100 rounded-xl p-4">
                     <h4 className="font-semibold text-red-800 mb-2">1. Spam</h4>
                     <ul className="list-disc pl-4 space-y-1">
                       <li>Il dominio finisce per .xyz, .top, .click, ecc.</li>
-                      <li>Il testo contiene termini spam: <em>telegram, seo, traffic, backlink...</em></li>
-                      <li><strong>[Nuovo]</strong> Oltre 4 pagine differenti all'interno dell'export possiedono lo stesso esatto titolo (frequente nelle reti PBN e bot).</li>
+                      <li>Il testo contiene termini spam: <em>telegram, seo, traffic...</em></li>
+                      <li>Oltre 4 pagine differenti all'interno dell'export possiedono lo stesso esatto titolo.</li>
                     </ul>
                   </div>
-                  
                   <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
                     <h4 className="font-semibold text-purple-800 mb-2">2. Affiliazione</h4>
                     <ul className="list-disc pl-4 space-y-1">
-                      <li>Il testo contiene termini relativi al betting: <em>quote, pronostici, bonus, scommesse...</em></li>
-                      <li><strong>[Nuovo]</strong> L'anchor text è una URL cruda (es. <em>www.sisal.it</em>, oppure domini .it/.com scritti senza spazi).</li>
-                      <li><strong>[Nuovo]</strong> L'anchor text contiene valute economiche (€, $) o percentuali di bonus (es. <em>50€</em>, <em>100%</em>).</li>
-                      <li><strong>[Nuovo]</strong> L'anchor text è composto esclusivamente da numeri o decimali (es. <em>1.50</em>).</li>
+                      <li>Il testo contiene termini relativi al betting: <em>quote, pronostici, bonus...</em></li>
+                      <li>L'anchor text è una URL cruda o contiene valute (€, $) o percentuali di bonus.</li>
+                      <li>L'anchor text è composto esclusivamente da numeri o decimali (es. <em>1.50</em>).</li>
                     </ul>
                   </div>
-
                   <div className="bg-green-50 border border-green-100 rounded-xl p-4">
                     <h4 className="font-semibold text-green-800 mb-2">3. Article Marketing</h4>
                     <ul className="list-disc pl-4 space-y-1">
-                      <li>Il dominio ha estensioni standard (.it, .com, .net, ecc.) ed è di una lunghezza naturale.</li>
+                      <li>Il dominio ha estensioni standard ed è di una lunghezza naturale.</li>
                       <li>Nessuna presenza di indicatori Spam o di Affiliazione.</li>
-                      <li><strong>[Nuovo]</strong> L'anchor text è "discorsivo": contiene spazi ed è lungo almeno 6 caratteri (es. <em>"Sisal Blog analisi"</em>).</li>
+                      <li>L'anchor text è "discorsivo": contiene spazi ed è lungo almeno 6 caratteri.</li>
                     </ul>
                   </div>
-
                 </div>
                 <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
                   <button onClick={() => setIsInfoOpen(false)} className="bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700">Chiudi</button>
