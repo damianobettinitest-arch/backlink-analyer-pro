@@ -80,12 +80,13 @@
       return false;
     };
 
-    // --- LOGICA DI CATEGORIZZAZIONE ---
-    const SPAM_TLDS = ['.xyz', '.top', '.click', '.monster', '.space', '.pw', '.cc', '.ru', '.tokyo', '.icu', '.club', '.online', '.site'];
-    const SPAM_KEYWORDS = ['telegram', 'seo', 'traffic', 'backlink', 'index', 'black hat', 'pbn', 'anomaly', 'boost', 'viagra', 'cialis', 'porn', 'escort'];
+    // --- COSTANTI LOGICHE ---
+    const SPAM_TLDS = ['.xyz', '.top', '.click', '.monster', '.space', '.pw', '.cc', '.ru', '.tokyo', '.icu', '.club', '.online', '.site', '.cf', '.gq', '.ml'];
+    const SPAM_KEYWORDS = ['telegram', 'seo', 'traffic', 'backlink', 'index', 'black hat', 'pbn', 'anomaly', 'boost', 'viagra', 'cialis', 'porn', 'escort', 'adult'];
     const AFFILIATE_KEYWORDS = ['quote', 'pronostic', 'bonus', 'scommess', 'match', 'bookmaker', 'comparazion', 'migliori', 'schedin', 'betting', 'casino', 'slot', 'poker', 'odds', 'freebet', 'sponsored', 'sponsorizzato', 'advertorial'];
 
-    const categorizeRow = (rowObj, titleCounts = {}) => {
+    // --- LOGICA DI CATEGORIZZAZIONE BACKLINK ---
+    const categorizeBacklinkRow = (rowObj, titleCounts = {}) => {
       const url = (rowObj['Source url'] || '').toLowerCase().trim();
       const title = (rowObj['Source title'] || '').toLowerCase().trim();
       const anchor = (rowObj['Anchor'] || '').toLowerCase().trim();
@@ -136,14 +137,49 @@
       }
       if (isArticle) return 'Article Marketing';
 
-      // 4. FALLBACK
       return 'Non Categorizzato';
     };
 
-    const isItDomain = (url) => {
+    // --- LOGICA DI CATEGORIZZAZIONE REFERRING DOMAINS ---
+    const categorizeDomainRow = (rowObj) => {
+      let hostname = (rowObj['Domain'] || '').toLowerCase().trim();
+      hostname = hostname.replace(/^https?:\/\//, '').replace(/^www\./, '');
+      const domainParts = hostname.split('.');
+      const isSubdomain = domainParts.length > 2 && !hostname.endsWith('.co.uk') && !hostname.endsWith('.gov.it');
+
+      // 1. SPAM
+      let isSpam = false;
+      if (SPAM_TLDS.some(tld => hostname.endsWith(tld))) isSpam = true;
+      if (SPAM_KEYWORDS.some(kw => hostname.includes(kw))) isSpam = true;
+      if (isSubdomain) isSpam = true;
+      if (isSpam) return 'Spam';
+
+      // 2. AFFILIAZIONE / SPONSORED
+      let isAffiliate = false;
+      if (AFFILIATE_KEYWORDS.some(kw => hostname.includes(kw))) isAffiliate = true;
+      if (isAffiliate) return 'Affiliazione / Sponsored';
+
+      // 3. ARTICLE MARKETING (Criteri più flessibili dato che non abbiamo title/anchor)
+      let isArticle = false;
+      const validTlds = ['.it', '.com', '.net', '.org', '.eu', '.info', '.blog'];
+      const hasValidTld = validTlds.some(tld => hostname.endsWith(tld));
+      
+      if (hasValidTld && !isSubdomain) {
+        const domainName = domainParts[0];
+        if (domainName.length < 25 && !hostname.includes('forum') && !hostname.includes('directory')) {
+          isArticle = true;
+        }
+      }
+      if (isArticle) return 'Article Marketing';
+
+      return 'Non Categorizzato';
+    };
+
+    const isItDomain = (row, mode) => {
       try {
-        const urlStr = (url || '').toLowerCase().trim();
-        return new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`).hostname.endsWith('.it');
+        const urlStr = mode === 'domains' ? (row['Domain'] || '') : (row['Source url'] || '');
+        const cleanUrl = urlStr.toLowerCase().trim();
+        return new URL(cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`).hostname.endsWith('.it');
       } catch(e) { return false; }
     };
 
@@ -192,11 +228,16 @@
       'First seen': 120,
       'Categoria': 200,
       'Dominio': 180,
+      'Domain': 220,
+      'Domain ascore': 120,
+      'Backlinks': 100,
+      'Country': 90,
       'Source title': 350,
       'Source url': 350,
       'Anchor': 250,
       'Target url': 300,
-      'Page ascore': 120
+      'Page ascore': 120,
+      'IP Address': 130
     };
 
     // --- COMPONENTI UI ---
@@ -247,6 +288,7 @@
       const [visibleColumns, setVisibleColumns] = useState([]);
       const [colWidths, setColWidths] = useState({});
       
+      const [fileMode, setFileMode] = useState('backlinks'); // 'backlinks' or 'domains'
       const [activeTab, setActiveTab] = useState('Tutti');
       const [isInfoOpen, setIsInfoOpen] = useState(false);
       const [isColumnsMenuOpen, setIsColumnsMenuOpen] = useState(false);
@@ -268,32 +310,44 @@
           if (parsedRows.length < 2) { alert("File CSV non valido o vuoto."); return; }
           
           const fileHeaders = parsedRows[0];
-          const titleIdx = fileHeaders.indexOf('Source title');
           
+          // --- RILEVAMENTO MODALITÀ ---
+          let mode = 'backlinks';
+          if (fileHeaders.includes('Domain') && !fileHeaders.includes('Source url')) {
+            mode = 'domains';
+          }
+          setFileMode(mode);
+
+          const titleIdx = fileHeaders.indexOf('Source title');
           const newTitleCounts = {};
-          if (titleIdx !== -1) {
+          
+          if (mode === 'backlinks' && titleIdx !== -1) {
             parsedRows.slice(1).forEach(rowArr => {
               const t = (rowArr[titleIdx] || '').toLowerCase().trim();
               if (t) newTitleCounts[t] = (newTitleCounts[t] || 0) + 1;
             });
+            setTitleCounts(newTitleCounts);
           }
-          setTitleCounts(newTitleCounts);
 
           const parsedData = parsedRows.slice(1).map((rowArr, index) => {
             const rowObj = { _id: index.toString() };
             fileHeaders.forEach((h, i) => { rowObj[h] = rowArr[i]; });
-            rowObj.Categoria = categorizeRow(rowObj, newTitleCounts);
             
-            // Estrazione del Dominio Pulito
-            let pulito = '';
-            try {
-              const urlStr = (rowObj['Source url'] || '').trim();
-              if (urlStr) {
-                const urlObj = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
-                pulito = urlObj.hostname.replace(/^www\./, '');
-              }
-            } catch(e) {}
-            rowObj['Dominio'] = pulito;
+            if (mode === 'backlinks') {
+              rowObj.Categoria = categorizeBacklinkRow(rowObj, newTitleCounts);
+              // Estrazione del Dominio Pulito
+              let pulito = '';
+              try {
+                const urlStr = (rowObj['Source url'] || '').trim();
+                if (urlStr) {
+                  const urlObj = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
+                  pulito = urlObj.hostname.replace(/^www\./, '');
+                }
+              } catch(e) {}
+              rowObj['Dominio'] = pulito;
+            } else {
+              rowObj.Categoria = categorizeDomainRow(rowObj);
+            }
 
             return rowObj;
           });
@@ -303,15 +357,27 @@
           const fsIndex = displayHeaders.indexOf('First seen');
           if (fsIndex !== -1) displayHeaders.splice(fsIndex, 1);
           
-          const headersWithCat = ['First seen', 'Categoria', 'Dominio', ...displayHeaders];
-          const defaultVisible = ['First seen', 'Categoria', 'Dominio', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
-          const initialVisible = headersWithCat.filter(h => defaultVisible.includes(h));
+          let headersWithCat = [];
+          let initialVisible = [];
+          
+          if (mode === 'backlinks') {
+            headersWithCat = ['First seen', 'Categoria', 'Dominio', ...displayHeaders];
+            const defaultVisible = ['First seen', 'Categoria', 'Dominio', 'Source title', 'Source url', 'Anchor', 'Page ascore'];
+            initialVisible = headersWithCat.filter(h => defaultVisible.includes(h));
+          } else {
+            // Per file refdomains, Domain è già un header
+            const domIndex = displayHeaders.indexOf('Domain');
+            if (domIndex !== -1) displayHeaders.splice(domIndex, 1);
+            headersWithCat = ['First seen', 'Categoria', 'Domain', ...displayHeaders];
+            const defaultVisible = ['First seen', 'Categoria', 'Domain', 'Domain ascore', 'Backlinks', 'Country'];
+            initialVisible = headersWithCat.filter(h => defaultVisible.includes(h));
+          }
           
           setHeaders(headersWithCat);
-          setVisibleColumns(initialVisible.length > 0 ? initialVisible : ['First seen', 'Categoria', 'Dominio', ...displayHeaders.slice(0, 3)]);
+          setVisibleColumns(initialVisible.length > 0 ? initialVisible : ['First seen', 'Categoria', ...displayHeaders.slice(0, 4)]);
           setData(parsedData);
           setCurrentPage(1);
-          setSortConfig({ key: 'First seen', direction: 'desc' }); // Ripristino ordinamento all'avvio
+          setSortConfig({ key: 'First seen', direction: 'desc' });
         };
         reader.readAsText(file);
       };
@@ -320,8 +386,10 @@
         setData(prev => prev.map(row => {
           if (row._id === rowId) {
             const updatedRow = { ...row, [column]: newValue };
-            if (['Source url', 'Source title', 'Anchor'].includes(column)) {
-              updatedRow.Categoria = categorizeRow(updatedRow, titleCounts);
+            if (fileMode === 'backlinks' && ['Source url', 'Source title', 'Anchor'].includes(column)) {
+              updatedRow.Categoria = categorizeBacklinkRow(updatedRow, titleCounts);
+            } else if (fileMode === 'domains' && column === 'Domain') {
+              updatedRow.Categoria = categorizeDomainRow(updatedRow);
             }
             return updatedRow;
           }
@@ -336,7 +404,7 @@
 
       // --- ORDINAMENTO DATI ---
       const requestSort = (key, e) => {
-        if (e.target.classList.contains('resizer')) return; // Ignora se sto ridimensionando
+        if (e.target.classList.contains('resizer')) return; 
         let direction = 'asc';
         if (sortConfig.key === key && sortConfig.direction === 'asc') {
           direction = 'desc';
@@ -346,9 +414,9 @@
 
       const filteredData = useMemo(() => {
         if (activeTab === 'Tutti') return data;
-        if (activeTab === 'Domini .it') return data.filter(d => isItDomain(d['Source url']));
+        if (activeTab === 'Domini .it') return data.filter(d => isItDomain(d, fileMode));
         return data.filter(d => d.Categoria === activeTab);
-      }, [data, activeTab]);
+      }, [data, activeTab, fileMode]);
 
       const sortedData = useMemo(() => {
         let sortableItems = [...filteredData];
@@ -360,8 +428,7 @@
             aValue = aValue === undefined || aValue === null ? '' : aValue;
             bValue = bValue === undefined || bValue === null ? '' : bValue;
 
-            // Ordinamento Numerico Intelligente (per Ascore e altri numeri)
-            if (sortConfig.key === 'Page ascore' || (!isNaN(aValue) && !isNaN(bValue) && aValue !== '' && bValue !== '')) {
+            if (sortConfig.key === 'Page ascore' || sortConfig.key === 'Domain ascore' || sortConfig.key === 'Backlinks' || (!isNaN(aValue) && !isNaN(bValue) && aValue !== '' && bValue !== '')) {
               const numA = Number(aValue);
               const numB = Number(bValue);
               if (numA < numB) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -369,7 +436,6 @@
               return 0;
             }
 
-            // Ordinamento Testuale / Date
             const strA = String(aValue).toLowerCase();
             const strB = String(bValue).toLowerCase();
             if (strA < strB) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -389,7 +455,6 @@
         const initialWidth = colWidths[col] || DEFAULT_WIDTHS[col] || 150;
         
         const onMouseMove = (moveEvent) => {
-          // Permettiamo di stringere la colonna fino a soli 15px
           const newWidth = Math.max(15, initialWidth + (moveEvent.clientX - startX));
           setColWidths(prev => ({ ...prev, [col]: newWidth }));
         };
@@ -425,7 +490,6 @@
 
       const TABS = ['Tutti', 'Spam', 'Article Marketing', 'Affiliazione / Sponsored', 'Non Categorizzato', 'Domini .it'];
 
-      // Calcola larghezza totale tabella (cruciale per il resize forzato in html)
       const tableWidth = headers.filter(h => visibleColumns.includes(h))
                                 .reduce((acc, col) => acc + (colWidths[col] || DEFAULT_WIDTHS[col] || 150), 0);
 
@@ -439,7 +503,7 @@
                 </div>
                 <div>
                   <h1 className="text-xl font-bold text-gray-900 leading-tight">Backlink Analyzer Pro</h1>
-                  <p className="text-xs text-gray-500">Semrush Data Categorizer</p>
+                  <p className="text-xs text-gray-500">Semrush Data Categorizer {data.length > 0 && <span className="ml-2 font-medium bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Modalità: {fileMode === 'backlinks' ? 'Backlink' : 'Domini'}</span>}</p>
                 </div>
               </div>
               
@@ -463,7 +527,7 @@
                   <Icon path={icons.upload} size={32} />
                 </div>
                 <h2 className="text-lg font-semibold text-gray-800 mb-2">Nessun file caricato</h2>
-                <p className="text-sm text-gray-500 max-w-md">Carica un file di export dei backlink generato da Semrush (formato .csv) per iniziare l'analisi automatica.</p>
+                <p className="text-sm text-gray-500 max-w-md">Carica un file di export generato da Semrush (supporta automaticamente sia i file <strong>Backlink</strong> che i file <strong>Referring Domains</strong>) per iniziare l'analisi.</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -471,7 +535,7 @@
                 {activeTab === 'Domini .it' && (
                   <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-xl text-sm flex items-start gap-3 shadow-sm">
                     <Icon path={icons.info} size={20} className="mt-0.5 flex-shrink-0 text-blue-600" />
-                    <p><strong>Nota:</strong> Questa scheda filtra ed espone <em>tutti</em> i link provenienti da domini <strong>.it</strong>, senza distinzione di categoria.</p>
+                    <p><strong>Nota:</strong> Questa scheda espone tutti i risultati provenienti da domini <strong>.it</strong>, senza distinzione di categoria.</p>
                   </div>
                 )}
 
@@ -479,7 +543,7 @@
                   <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
                     {TABS.map(tab => {
                       const count = tab === 'Tutti' ? data.length : 
-                                    tab === 'Domini .it' ? data.filter(d => isItDomain(d['Source url'])).length :
+                                    tab === 'Domini .it' ? data.filter(d => isItDomain(d, fileMode)).length :
                                     data.filter(d => d.Categoria === tab).length;
                       return (
                         <button key={tab} onClick={() => setActiveTab(tab)} className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'}`}>
@@ -507,17 +571,16 @@
                         </div>
                       )}
                     </div>
-                    <button onClick={() => downloadFile(convertToCSV(sortedData, headers), `Semrush_${activeTab.replace(/\//g,'_')}.csv`)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
+                    <button onClick={() => downloadFile(convertToCSV(sortedData, headers), `Semrush_${fileMode}_${activeTab.replace(/\//g,'_')}.csv`)} className="bg-white border border-gray-300 text-gray-700 py-1.5 px-3 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium">
                       <Icon path={icons.download} size={16} /> <span>Scarica Vista</span>
                     </button>
-                    <button onClick={() => downloadFile(convertToCSV(data, headers), `Semrush_Completo.csv`)} className="bg-blue-600 text-white py-1.5 px-3 rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-medium">
+                    <button onClick={() => downloadFile(convertToCSV(data, headers), `Semrush_${fileMode}_Completo.csv`)} className="bg-blue-600 text-white py-1.5 px-3 rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-medium">
                       <Icon path={icons.download} size={16} /> <span>Scarica Tutto</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col">
-                  {/* Wrapper con scroll orizzontale */}
                   <div className="overflow-x-auto">
                     <table className="divide-y divide-gray-200 table-fixed" style={{ width: `${tableWidth}px` }}>
                       <thead className="bg-gray-50">
@@ -563,7 +626,7 @@
                                       {row[col]}
                                     </span>
                                   ) : (
-                                    <EditableCell value={row[col]} isUrl={col.toLowerCase().includes('url')} onSave={(newVal) => handleCellEdit(row._id, col, newVal)} />
+                                    <EditableCell value={row[col]} isUrl={col.toLowerCase().includes('url') || col === 'Domain'} onSave={(newVal) => handleCellEdit(row._id, col, newVal)} />
                                   )}
                                 </td>
                               ))}
@@ -629,22 +692,26 @@
                 </div>
                 <div className="p-5 space-y-5 text-sm text-gray-600 max-h-[70vh] overflow-y-auto">
                   
+                  <div className="bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-xl">
+                    <strong>Il Tool è Intelligente:</strong> adatta le sue regole a seconda se stai caricando un file di <em>Backlink specifici</em> (con anchor text e titoli) o un file di <em>Referring Domains</em> (solo lista domini).
+                  </div>
+
                   <div className="bg-red-50 border border-red-100 rounded-xl p-4">
                     <h4 className="font-semibold text-red-800 mb-2">1. Spam</h4>
                     <ul className="list-disc pl-4 space-y-1">
-                      <li>Il dominio finisce per .xyz, .top, .click, ecc.</li>
-                      <li>Il testo contiene termini spam: <em>telegram, seo, traffic...</em></li>
-                      <li>Oltre 4 pagine differenti all'interno dell'export possiedono lo stesso esatto titolo.</li>
-                      <li>Il link proviene da un sottodominio di terzo livello (es. <em>blog.dominio.it</em>).</li>
+                      <li>Il dominio ha un'estensione atipica (.xyz, .top, .click, ecc.).</li>
+                      <li>Il testo (o il dominio) contiene termini spam: <em>telegram, seo, traffic...</em></li>
+                      <li>Provengono da un sottodominio di terzo livello (es. <em>blog.dominio.it</em>).</li>
+                      <li><em>(Solo Backlink)</em> Oltre 4 pagine possiedono lo stesso esatto titolo nell'export.</li>
                     </ul>
                   </div>
                   
                   <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
                     <h4 className="font-semibold text-purple-800 mb-2">2. Affiliazione / Sponsored</h4>
                     <ul className="list-disc pl-4 space-y-1">
-                      <li>Il testo contiene termini relativi al betting: <em>quote, pronostici, bonus...</em> oppure promozionali: <em>sponsored, advertorial</em>.</li>
-                      <li>L'anchor text è una URL cruda o contiene valute (€, $) o percentuali di bonus.</li>
-                      <li>L'anchor text è composto esclusivamente da numeri o decimali (es. <em>1.50</em>).</li>
+                      <li>Il testo/dominio contiene termini betting (<em>quote, pronostici, bonus</em>) o promozionali (<em>sponsored</em>).</li>
+                      <li><em>(Solo Backlink)</em> L'anchor text è una URL cruda o contiene valute (€, $) o percentuali di bonus.</li>
+                      <li><em>(Solo Backlink)</em> L'anchor text è composto esclusivamente da numeri o decimali (es. <em>1.50</em>).</li>
                     </ul>
                   </div>
                   
@@ -652,10 +719,9 @@
                     <h4 className="font-semibold text-green-800 mb-2">3. Article Marketing</h4>
                     <ul className="list-disc pl-4 space-y-1">
                       <li>Il dominio è principale (non un sottodominio), ha estensioni standard ed è di una lunghezza naturale.</li>
-                      <li>Nessuna presenza di indicatori Spam o di Affiliazione/Sponsored.</li>
-                      <li>L'anchor text è discorsivo: contiene spazi ed è lungo almeno 6 caratteri.</li>
-                      <li>Il titolo è discorsivo e contiene parole tipiche della <strong>lingua italiana</strong> (per escludere titoli stranieri, anche su domini .it).</li>
-                      <li>L'URL del link ha la tipica struttura di un articolo (contiene date nel formato <em>/anno/mese/</em> o permalink con almeno 3 trattini).</li>
+                      <li><em>(Solo Backlink)</em> L'anchor text è discorsivo.</li>
+                      <li><em>(Solo Backlink)</em> Il titolo è discorsivo e contiene parole tipiche della <strong>lingua italiana</strong>.</li>
+                      <li><em>(Solo Backlink)</em> L'URL ha la tipica struttura di un articolo (datazioni o url leggibili).</li>
                     </ul>
                   </div>
 
